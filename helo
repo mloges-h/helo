@@ -285,6 +285,14 @@ curl http://127.0.0.1:9913/metrics | grep status
         proxy_pass http://127.0.0.1:9113/metrics;
     }
 
+  #nginx for karixsolution
+  location /karixsolutions-log-exporter {
+        proxy_pass http://127.0.0.1:9913/metrics;
+    }
+
+  location /karixsolutions-nginx-exporter {
+        proxy_pass http://127.0.0.1:9113/metrics;
+    }
 
 
 check servername use the domain because ip is the main thing we need to map so we use this ip

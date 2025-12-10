@@ -1,0 +1,292 @@
+Centralized servers:
+
+Step 1
+
+wget https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+ls
+tar -xvf prometheus-3.5.0.linux-amd64.tar.gz
+ls
+cd prometheus-3.5.0.linux-amd64/
+ls
+vi prometheus.yml
+
+scrape_configs:
+
+  - job_name: 'nginx_monitoring'
+    static_configs:
+      - targets: ['<exporter_host_ip>:9113'] 
+        labels:
+          instance: nginx-primary-server
+-----------------------------------------------------------------------
+Step 2:
+
+Full file with alert manager and alert-rules
+
+root@CLK-H1:~# cat /opt/prometheus-3.5.0.linux-amd64/prometheus.yml
+# my global config
+global:
+  scrape_interval: 15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+           - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "/opt/prometheus-3.5.0.linux-amd64/alert-rules.yml"
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: "prometheus"
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+      - targets: ["localhost:9090"]
+       # The label name is added as a label `label_name=<label_value>` to any timeseries scraped from this config.
+        labels:
+          app: "prometheus"
+  - job_name: 'nginx_monitoring'
+    static_configs:
+      - targets: ['13.204.43.210:9113']
+        labels:
+          instance: nginx-primary-server
+
+-----------------------------------------------------------------------
+Step 3:
+
+alert-rules.yml file:
+
+root@CLK-H1:~# cat /opt/prometheus-3.5.0.linux-amd64/alert-rules.yml
+groups:
+- name: nginx-alerts
+  rules:
+
+  - alert: NginxNo200Responses
+    expr: rate(nginx_http_requests_total{status="200"}[2m]) == 0
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "NGINX 200 OK responses have dropped to zero"
+      description: "No 200 responses in the last 2 minutes. App may be down."
+
+  - alert: NginxHigh500Errors
+    expr: rate(nginx_http_requests_total{status="500"}[2m]) > 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "NGINX 500 errors detected"
+      description: "Application is returning 500 (server errors)."
+
+  - alert: NginxHigh400Errors
+    expr: rate(nginx_http_requests_total{status="400"}[2m]) > 0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "NGINX 400 errors detected"
+      description: "Clients are generating 400 (bad request) responses."
+
+  - alert: NginxUpstreamFailures
+    expr: rate(nginx_upstream_requests_total{status="500"}[2m]) > 0
+    for: 30s
+    labels:
+      severity: critical
+    annotations:
+      summary: "NGINX upstream failing"
+      description: "Upstream server is returning 500 or failing completely."
+
+  - alert: NginxExporterDown
+    expr: up{job="nginx_monitoring"} == 0
+    for: 30s
+    labels:
+      severity: critical
+    annotations:
+      summary: "NGINX Exporter is DOWN"
+      description: "Prometheus cannot scrape metrics from the NGINX exporter."
+
+  - alert: Nginx_Down
+    expr: nginx_up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Nginx seems down"
+      description: "Nginx stopped serving, exporter cannot scrape metrics."
+
+-------------------------------------------------------------------------------
+Step 4:
+
+vi /opt/alertmanager-0.29.0.linux-amd64/alertmanager.yml
+
+root@CLK-H1:~# cat /opt/alertmanager-0.29.0.linux-amd64/alertmanager.yml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+  receiver: 'email-alert'
+
+receivers:
+  - name: 'email-alert'
+    email_configs:
+      - to: 'logesh@sixthstar.in'
+        from: 'logesh@sixthstar.in'
+        smarthost: 'star.sixthstar.in:587'
+        auth_username: 'logesh@sixthstar.in'
+        auth_identity: 'logesh@sixthstar.in'
+        auth_password: 'Mlogan@123#'
+        require_tls: true
+        send_resolved: true
+
+-------------------------------------------------------------------------------
+Step 5:
+
+Start Alertmanager:
+
+./alertmanager --config.file=alertmanager.yml &
+
+./prometheus --config.file=prometheus.yml &
+   35  ss -tulnp | grep Prometheus ( kill no)
+   36  pkill ./prometheus --config.file=prometheus.yml
+
+--------------------------------------------------------------------------------------------------------------------
+Steps 6:
+
+to set alert in grafana:
+
+vi /etc/grafana/grafana.ini
+
+#################################### SMTP / Emailing ##########################
+[smtp]
+enabled = true
+host = star.sixthstar.in:587
+user = logesh@sixthstar.in
+password = """Mlogan@123#"""
+skip_verify = true
+from_address = logesh@sixthstar.in
+from_name = Grafana Alerts
+startTLS_policy = OpportunisticStartTLS
+
+systemctl restart grafana-server
+--------------------------------------------------------------------------------------------------------------------
+Steps 7:
+
+Remote servers:
+
+vi /etc/nginx/conf.d/status.conf
+
+server {
+    listen 8080;
+    # Optionally: allow access only from localhost
+    # listen 127.0.0.1:8080;
+
+    server_name _;
+
+    location /status {
+            stub_status;
+    }
+
+}
+
+nginx -t
+service nginx reload
+
+Test: curl http://127.0.0.1:8080/status
+--------------------------------------------------------------------------------------------------------------------
+Steps 8: 
+
+ss -tulnp | grep 8080
+ss -tulnp | grep 9113
+
+
+if it is going to be deploy in container means use this command
+
+apt install docker.io -y
+
+root@ip-172-31-8-161:/opt# docker run -d \
+    --name nginx-exporter-local \
+    --network=host \
+    nginx/nginx-prometheus-exporter:1.5.1 \
+    --nginx.scrape-uri=http://127.0.0.1:8080/status
+
+Test: curl http://127.0.0.1:9113/metrics
+
+--------------------------------------------------------------------------------------------------------------------
+Steps 9:
+
+ss -tulnp | grep 9913
+
+nginx logs exporter run:
+
+vi /opt/nginxlog.yaml
+
+listen:
+  port: 9913
+  address: 0.0.0.0
+
+namespaces:
+  - name: nginx
+    format: "$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent \"$http_referer\" \"$http_user_agent\""
+    source_files:
+      - /var/log/nginx/access.log
+
+---------
+docker run -d \
+  --name nginx-log-exporter \
+  --network host \
+  -v /opt/nginxlog.yaml:/config.yaml \
+  -v /var/log/nginx:/var/log/nginx:ro \
+  quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.11.0 \
+  --config-file=/config.yaml
+
+
+
+--------------------------------------------------------------------------------------------------------------------
+Steps 10:
+
+Testing  errors:
+
+end=$((SECONDS+120))
+while [ $SECONDS -lt $end ]; do
+  curl -s http://65.0.7.208:8081/error500 > /dev/null
+  sleep 0.5
+done
+
+curl http://127.0.0.1/abc
+curl http://localhost:9913/metrics | grep 'GET.*404'
+
+
+curl -i http://127.0.0.1:8080/error500
+
+curl http://127.0.0.1:9913/metrics | grep status
+
+--------------------------------------------------------------------------------------------------------------------
+  location /karix.ae-log-exporter {
+        proxy_pass http://127.0.0.1:9913/metrics;
+    }
+
+  location /karix.ae-nginx-exporter {
+        proxy_pass http://127.0.0.1:9113/metrics;
+    }
+
+
+
+check servername use the domain because ip is the main thing we need to map so we use this ip
+
+	

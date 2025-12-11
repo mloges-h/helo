@@ -25,6 +25,19 @@ vi prometheus.yml
           summary: "High NGINX error rate"
           description: "More than 10% of GET requests are failing with 5xx errors."
 
+View in Alertmanager
+[1] Firing
+Labels
+alertname = NginxUser4xxErrors
+instance = twixor.karix.solutions:443
+job = nginx_karixsolutions_log
+method = GET
+severity = warning
+status = 400
+Annotations
+description = More than 10% of GET requests are returning 4xx errors in the last 1 minute.
+summary = Users are receiving 4xx errors
+Source
 
 scrape_configs:
 
